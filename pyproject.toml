@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai_embeddings"
+version = "0.1.2"
+description = "A Python package for embedding tools and AI-related functionalities."
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [ {name = "Dwight Beaver", email = "dsbeav@gmail.com"} ]
+requires-python = ">=3.8"
+dependencies = [
+    "chromadb",
+    "openai",
+    "PyPDF2",
+    "langchain",
+    "langchain-openai",
+    "langchain-community",
+    "pydantic"
+]
+
+[project.scripts]
+embed-files = "ai_embeddings.cli:main"

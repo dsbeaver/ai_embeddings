@@ -1,6 +1,0 @@
-chromadb
-openai
-PyPDF2
-langchain
-langchain-openai
-langchain-community
