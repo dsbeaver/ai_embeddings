@@ -1,6 +1,7 @@
 import argparse
-from ai_embeddings.embed import ChunkInput, Chunker, ChromaDBEmbeddingStore
+from embed import ChunkInput, Chunker, EmbedChromaDB
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+
 
 def main():
     # Set up argparse
@@ -54,8 +55,8 @@ def main():
 
     try:
         # Process the file with Chunker
-        chunker = Chunker(chunk_input)
-        chunked_data = chunker.chunk()
+        chunker = Chunker()
+        chunked_data = chunker.chunk(chunk_input)
 
         # Output summary of chunks and metadata
         print(f"Total Chunks: {len(chunked_data.docs)}")
@@ -64,13 +65,12 @@ def main():
         print(f"Metadata: {chunked_data.metadata}")
 
         # Store embeddings in ChromaDB
-        chromadb_store = ChromaDBEmbeddingStore(
-            chunked_data=chunked_data,
+        chromadb_store = EmbedChromaDB(
             chromadb_path=args.chromadb_path,
             collection_name=args.collection_name,
             embedding_model_name=args.embedding_model_name,
         )
-        result = chromadb_store.store_embeddings()
+        result = chromadb_store.store_embeddings(chunked_data)
 
         # Print operation summary
         print("\nChromaDB Operation Summary:")

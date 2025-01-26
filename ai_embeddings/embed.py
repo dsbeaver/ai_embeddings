@@ -9,6 +9,8 @@ from PyPDF2 import PdfReader
 from langchain_openai import OpenAIEmbeddings
 from typing import List, Dict, Callable, Type, Optional
 import chromadb
+import hashlib
+import uuid
 
 
 class ChunkedData(BaseModel):
@@ -75,12 +77,12 @@ class Chunker:
         # Specific mappings can remain here
     }
 
-    def __init__(self, ci: ChunkInput):
-        self.ci = ci
-
-    def load(self) -> str:
+    def load(self, ci: ChunkInput) -> str:
         """
         Load text from the provided path using the appropriate loader.
+
+        Args:
+            ci (ChunkInput): The input object containing chunking details.
 
         Returns:
             str: The loaded text.
@@ -88,13 +90,13 @@ class Chunker:
         Raises:
             ValueError: If the MIME type is invalid or unsupported.
         """
-        if not self.ci.path:
+        if not ci.path:
             raise ValueError("No file path provided in the input.")
 
-        mime_type, _ = mimetypes.guess_type(self.ci.path)
+        mime_type, _ = mimetypes.guess_type(ci.path)
 
         if not mime_type:
-            raise ValueError(f"Could not determine MIME type for file: {self.ci.path}")
+            raise ValueError(f"Could not determine MIME type for file: {ci.path}")
 
         # Use the specific loader if available
         loader_name = self.mime_type_to_loader.get(mime_type)
@@ -108,7 +110,7 @@ class Chunker:
 
         # Call the appropriate loader function
         loader = getattr(self, loader_name)
-        return loader(self.ci.path)
+        return loader(ci.path)
 
     def load_pdf(self, path: str) -> str:
         """
@@ -152,35 +154,44 @@ class Chunker:
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
 
-    def chunk(self) -> ChunkedData:
+    def chunk(self, ci: ChunkInput) -> ChunkedData:
         """
         Splits the loaded text into chunks using the specified splitter and returns a ChunkedData object.
+
+        Args:
+            ci (ChunkInput): The input object containing chunking details.
 
         Returns:
             ChunkedData: The result containing the chunks and associated metadata.
         """
         # Load the text (file or inline text)
-        if self.ci.path:
-            text = self.load()
+        if ci.path:
+            text = self.load(ci)
         else:
-            text = self.ci.text
+            text = ci.text
 
         # Initialize the text splitter from the ChunkInput
-        text_splitter = self.ci.splitter(
-            chunk_size=self.ci.chunk_size,
-            chunk_overlap=self.ci.chunk_overlap,
-            separators=self.ci.separators,
+        text_splitter = ci.splitter(
+            chunk_size=ci.chunk_size,
+            chunk_overlap=ci.chunk_overlap,
+            separators=ci.separators,
         )
 
         # Split the text into chunks
         chunks = text_splitter.split_text(text)
 
         # Return a ChunkedData object
+        if ci.path:
+            source = ci.path
+        elif ci.metadata['url']:
+            source = ci.metadata['url']
+        else:
+            source = f"InlineText_{uuid.uuid4}"
         return ChunkedData(
             docs=chunks,
-            source=self.ci.path if self.ci.path else "Inline Text",
+            source=source,
             index_on=datetime.now(),
-            metadata=self.ci.metadata,
+            metadata=ci.metadata,
         )
 
     def validate_mimetype(self, path: str):
@@ -201,62 +212,89 @@ class Chunker:
                 f"Supported MIME types are: {', '.join(self.mime_type_to_loader.keys())} or any 'text/' type."
             )
 
-class ChromaDBEmbeddingStore:
+
+
+class EmbedChromaDB:
     def __init__(
-        self,
-        chunked_data: ChunkedData,
-        chromadb_path: str,
-        collection_name: str,
-        embedding_model_name: str,
+        self, 
+        chromadb_path: str, 
+        collection_name: str, 
+        embedding_model_name: str, 
+        embedding_class: Callable = OpenAIEmbeddings
     ):
         """
-        Initializes the ChromaDBEmbeddingStore.
+        Initializes the EmbedChromaDB with an embedding class and model name.
 
         Args:
-            chunked_data (ChunkedData): The input ChunkedData object containing texts and metadata.
             chromadb_path (str): Path to the ChromaDB storage directory.
             collection_name (str): Name of the ChromaDB collection.
-            embedding_model_name (str): Name of the OpenAI embedding model.
+            embedding_model_name (str): Name of the embedding model.
+            embedding_class (Callable, optional): A callable embedding class (default: OpenAIEmbeddings).
         """
-        self.chunked_data = chunked_data
         self.chromadb_path = chromadb_path
         self.collection_name = collection_name
         self.embedding_model_name = embedding_model_name
 
-    def store_embeddings(self) -> Dict:
+        # Initialize the embedding model and embedding function
+        self.embedding_model = embedding_class(model=self.embedding_model_name)
+        self.embed_func = lambda text: self.embedding_model.embed_query(text)
+
+    def generate_embeddings(self, texts: List[str]) -> Dict:
         """
-        Generates embeddings using OpenAI and stores them in ChromaDB.
+        Generates embeddings for a list of texts.
+
+        Args:
+            texts (List[str]): A list of strings to embed.
+
+        Returns:
+            dict: Generated embeddings and associated metadata.
+        """
+        try:
+            start_time = time.time()
+            embeddings = [self.embed_func(text) for text in texts]
+            stop_time = time.time()
+
+            return {
+                "embeddings": embeddings,
+                "start_time": datetime.fromtimestamp(start_time).strftime("%Y-%m-%d %H:%M:%S"),
+                "stop_time": datetime.fromtimestamp(stop_time).strftime("%Y-%m-%d %H:%M:%S"),
+                "duration_seconds": stop_time - start_time,
+            }
+        except Exception as e:
+            raise ValueError(f"Error generating embeddings: {e}")
+
+    def store_embeddings(self, chunked_data: ChunkedData) -> Dict:
+        """
+        Stores embeddings generated for a ChunkedData object into ChromaDB.
+
+        Args:
+            chunked_data (ChunkedData): The input ChunkedData object containing texts and metadata.
 
         Returns:
             dict: Summary of the operation.
         """
         try:
-            # Initialize the embedding model
-            embedding_model = OpenAIEmbeddings(model=self.embedding_model_name)
-            embed_func = lambda doc: embedding_model.embed_query(doc)
-
-            # Extract texts and metadata
-            texts = self.chunked_data.docs
-            sources = [self.chunked_data.source] * len(texts)
-            index_on = self.chunked_data.index_on.isoformat()
-            additional_metadata = self.chunked_data.metadata
-
             # Generate embeddings
-            start_time = time.time()
-            embeddings = [embed_func(text) for text in texts]
-            stop_time = time.time()
+            embedding_results = self.generate_embeddings(chunked_data.docs)
+            embeddings = embedding_results["embeddings"]
+            texts = chunked_data.docs
+            source = chunked_data.source
+            index_on = chunked_data.index_on.isoformat()
+            additional_metadata = chunked_data.metadata
 
             # Initialize ChromaDB client and collection
             client = chromadb.PersistentClient(path=self.chromadb_path)
             collection = client.get_or_create_collection(name=self.collection_name)
-            ids = [f"doc_{i}" for i in range(len(texts))]
+            md5_hash = hashlib.md5(source.encode()).hexdigest() 
+            print(f"{source}: {md5_hash}")
+            ids = [f"{source}_{i}" for i in range(len(texts))]
             metadatas = [
                 {
                     **additional_metadata,
                     "source": source,
                     "index_on": index_on,
                 }
-                for source in sources
+                for _ in texts
             ]
 
             # Add documents to the collection
@@ -267,20 +305,14 @@ class ChromaDBEmbeddingStore:
                 metadatas=metadatas,
             )
 
-            # Return operation summary
             return {
                 "status": f"Successfully stored {len(texts)} documents.",
                 "success": True,
                 "chromadb_path": self.chromadb_path,
                 "collection_name": self.collection_name,
-                "embedding_model_name": self.embedding_model_name,
-                "start_time": datetime.fromtimestamp(start_time).strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                ),
-                "stop_time": datetime.fromtimestamp(stop_time).strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                ),
-                "duration_seconds": stop_time - start_time,
+                "start_time": embedding_results["start_time"],
+                "stop_time": embedding_results["stop_time"],
+                "duration_seconds": embedding_results["duration_seconds"],
                 "number_of_documents": len(texts),
                 "total_document_size": sum(len(text) for text in texts),
             }
@@ -290,9 +322,8 @@ class ChromaDBEmbeddingStore:
                 "success": False,
                 "chromadb_path": self.chromadb_path,
                 "collection_name": self.collection_name,
-                "embedding_model_name": self.embedding_model_name,
-                "number_of_documents": len(self.chunked_data.docs),
-                "total_document_size": sum(len(doc) for doc in self.chunked_data.docs),
+                "number_of_documents": len(chunked_data.docs),
+                "total_document_size": sum(len(doc) for doc in chunked_data.docs),
             }
 
 
