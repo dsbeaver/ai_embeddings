@@ -3,7 +3,7 @@ import json
 import argparse
 import shutil
 from datetime import datetime
-from embed import ChunkInput, Chunker, EmbedChromaDB
+from ai_embeddings.embed import ChunkInput, Chunker, EmbedChromaDB
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
