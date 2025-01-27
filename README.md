@@ -1,68 +1,78 @@
 # AI Embeddings
 
-AI Embeddings is a Python package designed for generating embeddings for text documents using AI models and storing them efficiently. The package provides the ability to split large text files or documents into smaller chunks, generate embeddings for each chunk using OpenAI models, and store the results in ChromaDB for easy retrieval and analysis.
+AI Embeddings is a Python package designed to provide embedding tools and AI-related functionalities. The package is capable of processing both JSON and plain text files, splitting the content into chunks, and storing the generated embeddings in a [ChromaDB](https://github.com/openai/chromadb) collection.
 
 ## Key Features
 
-- **Text Chunking:** Splits large text files or documents into manageable chunks.
-- **Embedding Generation:** Uses OpenAI models to generate embeddings for each chunk of text.
-- **Efficient Storage:** Stores the generated embeddings in a ChromaDB database for easy retrieval and analysis.
-- **Metadata Management:** Allows for the inclusion of additional metadata with each chunk of text, which is also stored in ChromaDB.
-- **File Type Support:** Supports a variety of file types, including PDF, DOCX, and plain text files.
-- **Command-Line Interface:** Provides a CLI for easy usage and integration into larger workflows.
+- Chunking: AI Embeddings splits text into chunks using a specified splitter and returns a `ChunkedData` object containing the chunks and associated metadata.
+- Embedding: The package generates embeddings using OpenAI's model for a list of texts.
+- Storage: The generated embeddings are stored in a ChromaDB collection.
+- MIME-type Validation: The input file's MIME type is validated before processing.
+- Multiprocessing: Thanks to multiprocessing, the package can process files concurrently, providing a significant performance boost when dealing with large datasets.
+- Daemon Mode: In this mode, the package watches a directory for new files and processes them as they appear.
 
 ## Installation
 
-Ensure you have Python version 3.8 or later installed. 
+You can install AI Embeddings by cloning the repository and building it using `setuptools` and `wheel`.
 
-To install the package, you can build it from source using Poetry. First, clone the repository:
-
-```
-git clone https://github.com/yourusername/ai_embeddings.git
+```bash
+git clone https://github.com/username/ai_embeddings.git
 cd ai_embeddings
-```
-
-Then, build and install the package:
-
-```
-python -m build
-pip install dist/ai_embeddings-0.1.2-py3-none-any.whl
+pip install setuptools wheel
+python setup.py bdist_wheel
+pip install dist/*.whl
 ```
 
 ## Configuration
 
-There is no specific environment variable configuration required for this package.
+Configuration is done through environment variables. Below are the available options:
 
-## Usage
+- `EMBED_FILES_CHUNK_SIZE`: Size of each chunk (default: 400).
+- `EMBED_FILES_CHUNK_OVERLAP`: Overlap between chunks (default: 100).
+- `EMBED_FILES_CHROMADB_PATH`: Path to ChromaDB storage (default: '/path/to/chromadb').
+- `EMBED_FILES_COLLECTION_NAME`: ChromaDB collection name (default: 'test_collection').
+- `EMBED_FILES_EMBEDDING_MODEL_NAME`: Embedding model name (default: 'text-embedding-ada-002').
+- `EMBED_FILES_WATCH_DIR`: Directory to watch in daemon mode.
+- `EMBED_FILES_PROCESSED_DIR`: Directory to move successfully processed files.
+- `EMBED_FILES_FAILED_DIR`: Directory to move failed files.
+- `EMBED_FILES_CONCURRENCY`: Number of concurrent workers in daemon mode (default: 5).
 
-The package can be used both as a library and as a CLI tool. Here is an example of how to use the CLI:
+## Usage Examples
 
+- File Processing:
+
+```bash
+python ai_embeddings/cli.py input.txt
 ```
-ai_embeddings /path/to/file --chunk_size 400 --chunk_overlap 100 --chromadb_path /path/to/chromadb --collection_name test-collection --embedding_model_name text-embedding-3-small
-```
 
-This will chunk the file at the specified path into chunks of size 400 with an overlap of 100, generate embeddings for each chunk using the `text-embedding-3-small` model, and store the results in the ChromaDB database at the specified path under the collection `test-collection`.
+- Run in Daemon Mode:
+
+```bash
+export EMBED_FILES_WATCH_DIR=/path/to/watch
+python ai_embeddings/cli.py --daemon
+```
 
 ## Directory Structure
+
+This project has the following structure:
 
 ```
 ai_embeddings/
     pyproject.toml
     .gitignore
+    env_template
+    LICENSE
     ai_embeddings/
         __init__.py
         embed.py
         cli.py
 ```
 
-## Contributing
-
-Contributions are welcomed! Please fork the repository and create a pull request with your changes, or create an issue if you find any bugs or have suggestions for improvements.
+- `embed.py`: Contains the core functionality for chunking files, generating embeddings, and storing them in ChromaDB.
+- `cli.py`: The command-line interface for the package.
 
 ## License
 
-This project is licensed under the terms specified in the `LICENSE` file of the repository.
+This project is licensed under the terms of the LICENSE file included in this repository.
 
-## Contact
-
-For any inquiries, please reach out to Dwight Beaver at dsbeav@gmail.com.  This readme was generated using ChatGPT
+> This README.md was generated using ChatGPT.

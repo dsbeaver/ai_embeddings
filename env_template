@@ -1,0 +1,24 @@
+# Chunk size for processing files
+export EMBED_FILES_CHUNK_SIZE=400
+
+# Overlap size between chunks
+export EMBED_FILES_CHUNK_OVERLAP=100
+
+# Path to ChromaDB storage directory
+export EMBED_FILES_CHROMADB_PATH=/path/to/chromadb
+
+# ChromaDB collection name
+export EMBED_FILES_COLLECTION_NAME=test_collection
+
+# Name of the embedding model
+export EMBED_FILES_EMBEDDING_MODEL_NAME=text-embedding-3-small
+
+# Directory to watch for new files in daemon mode
+export EMBED_FILES_WATCH_DIR=/path/to/watch/directory
+
+# Directory to move successfully processed files
+export EMBED_FILES_PROCESSED_DIR=/path/to/processed/files
+
+# Directory to move failed files
+export EMBED_FILES_FAILED_DIR=/path/to/failed/files
+

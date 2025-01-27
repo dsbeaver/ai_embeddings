@@ -17,7 +17,9 @@ dependencies = [
     "langchain",
     "langchain-openai",
     "langchain-community",
-    "pydantic"
+    "pydantic",
+    "watchdog",
+    "docx2txt"
 ]
 
 [project.scripts]
