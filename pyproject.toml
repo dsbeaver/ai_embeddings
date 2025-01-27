@@ -23,4 +23,4 @@ dependencies = [
 ]
 
 [project.scripts]
-embed-files = "ai_embeddings.cli:main"
+embedder = "ai_embeddings.cli:main"
