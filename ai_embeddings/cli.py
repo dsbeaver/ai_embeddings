@@ -7,7 +7,7 @@ from ai_embeddings.embed import ChunkInput, Chunker, EmbedChromaDB
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-from multiprocessing import Pool, Lock
+from multiprocessing import Pool, Lock, Queue
 import time
 import logging
 import openai
@@ -32,22 +32,39 @@ logging.basicConfig(
 lock = Lock()
 
 def process_file_wrapper(args):
-    """Wrapper to process files in a multiprocessing pool."""
+    """
+    Process a file by generating embeddings first and then storing them safely.
+    """
     file_path, chunk_size, chunk_overlap, chromadb_path, collection_name, embedding_model_name, processed_dir, failed_dir, delete = args
 
     try:
-        # Reinitialize FileProcessor in the worker process
         chunker = Chunker()
         chromadb_store = EmbedChromaDB(
             chromadb_path=chromadb_path,
             collection_name=collection_name,
             embedding_model_name=embedding_model_name,
         )
-        file_processor = FileProcessor(chunker, chromadb_store, chunk_size, chunk_overlap, processed_dir, failed_dir, delete)
-        file_processor.process_file(file_path)
+
+        file_processor = FileProcessor(chunker, chunk_size, chunk_overlap)
+
+        # Step 1: Generate chunks
+        chunked_data = file_processor.process_file(file_path)
+
+        # Step 2: Generate embeddings (Parallel)
+        embedding_results = chromadb_store.generate_embeddings(chunked_data.docs)
+
+        return {
+            "file_path": file_path,
+            "texts": chunked_data.docs,
+            "embeddings": embedding_results["embeddings"],
+            "metadata": chunked_data.metadata,
+            "source": chunked_data.source,
+        }
+
     except Exception as e:
-        with lock:
-            logging.error(f"Failed to process file {file_path}. Error: {e}")
+        logging.error(f"Error processing file {file_path}: {e}")
+        return None
+
 
 
 class FileProcessor:
@@ -146,11 +163,14 @@ class FileProcessor:
 
 
 def run_daemon(args):
-    """Run the script in daemon mode to watch a directory for new files."""
+    """
+    Run daemon mode to watch a directory, generate embeddings in parallel, and write them sequentially.
+    """
     logging.info(f"Processing existing files in directory: {args.watch_dir}")
+
+    # Get files from directory
     files = [os.path.join(args.watch_dir, f) for f in os.listdir(args.watch_dir) if os.path.isfile(os.path.join(args.watch_dir, f))]
 
-    # Serialize necessary arguments for workers
     pool_args = [
         (
             file,
@@ -166,24 +186,32 @@ def run_daemon(args):
         for file in files
     ]
 
-    # Process existing files
-    with Pool(args.concurrency) as pool:
-        pool.map(process_file_wrapper, pool_args)
+    # Queue to store generated embeddings
+    embedding_queue = Queue()
 
-    # Set up the observer to watch for new files
-    logging.info(f"Watching directory: {args.watch_dir} for new files...")
+    # Step 1: Generate embeddings in parallel
     with Pool(args.concurrency) as pool:
-        event_handler = DirectoryWatcher(args, pool)  # Pass args instead of precomputed pool_args
-        observer = Observer()
-        observer.schedule(event_handler, args.watch_dir, recursive=False)
-        observer.start()
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            observer.stop()
-        observer.join()
+        results = pool.map(process_file_wrapper, pool_args)
 
+        for res in results:
+            if res:
+                embedding_queue.put(res)
+
+    # Step 2: Store embeddings one at a time
+    chromadb_store = EmbedChromaDB(
+        chromadb_path=args.chromadb_path,
+        collection_name=args.collection_name,
+        embedding_model_name=args.embedding_model_name,
+    )
+
+    while not embedding_queue.empty():
+        res = embedding_queue.get()
+        chromadb_store.store_embeddings(
+            texts=res["texts"],
+            embeddings=res["embeddings"],
+            source=res["source"],
+            metadata=res["metadata"],
+        )
 
 class DirectoryWatcher(FileSystemEventHandler):
     """Lightweight event handler for multiprocessing pool."""

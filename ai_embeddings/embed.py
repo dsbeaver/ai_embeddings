@@ -214,116 +214,58 @@ class Chunker:
 
 
 
-class EmbedChromaDB:
-    def __init__(
-        self, 
-        chromadb_path: str, 
-        collection_name: str, 
-        embedding_model_name: str, 
-        embedding_class: Callable = OpenAIEmbeddings
-    ):
-        """
-        Initializes the EmbedChromaDB with an embedding class and model name.
 
-        Args:
-            chromadb_path (str): Path to the ChromaDB storage directory.
-            collection_name (str): Name of the ChromaDB collection.
-            embedding_model_name (str): Name of the embedding model.
-            embedding_class (Callable, optional): A callable embedding class (default: OpenAIEmbeddings).
+class EmbedChromaDB:
+    def __init__(self, chromadb_path: str, collection_name: str, embedding_model_name: str):
+        """
+        Initializes ChromaDB with the embedding model.
         """
         self.chromadb_path = chromadb_path
         self.collection_name = collection_name
-        self.embedding_model_name = embedding_model_name
+        self.embedding_model = OpenAIEmbeddings(model=embedding_model_name)
 
-        # Initialize the embedding model and embedding function
-        self.embedding_model = embedding_class(model=self.embedding_model_name)
-        self.embed_func = lambda text: self.embedding_model.embed_query(text)
-
-    def generate_embeddings(self, texts: List[str]) -> Dict:
+    def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
         """
         Generates embeddings for a list of texts.
+        """
+        start_time = time.time()
+        embeddings = [self.embedding_model.embed_query(text) for text in texts]
+        stop_time = time.time()
+        return {
+            "embeddings": embeddings,
+            "start_time": datetime.fromtimestamp(start_time).isoformat(),
+            "stop_time": datetime.fromtimestamp(stop_time).isoformat(),
+            "duration_seconds": stop_time - start_time,
+        }
 
-        Args:
-            texts (List[str]): A list of strings to embed.
-
-        Returns:
-            dict: Generated embeddings and associated metadata.
+    def store_embeddings(self, texts: List[str], embeddings: List[List[float]], source: str, metadata: Dict):
+        """
+        Stores precomputed embeddings into ChromaDB.
         """
         try:
-            start_time = time.time()
-            embeddings = [self.embed_func(text) for text in texts]
-            stop_time = time.time()
-
-            return {
-                "embeddings": embeddings,
-                "start_time": datetime.fromtimestamp(start_time).strftime("%Y-%m-%d %H:%M:%S"),
-                "stop_time": datetime.fromtimestamp(stop_time).strftime("%Y-%m-%d %H:%M:%S"),
-                "duration_seconds": stop_time - start_time,
-            }
-        except Exception as e:
-            raise ValueError(f"Error generating embeddings: {e}")
-
-    def store_embeddings(self, chunked_data: ChunkedData) -> Dict:
-        """
-        Stores embeddings generated for a ChunkedData object into ChromaDB.
-
-        Args:
-            chunked_data (ChunkedData): The input ChunkedData object containing texts and metadata.
-
-        Returns:
-            dict: Summary of the operation.
-        """
-        try:
-            # Generate embeddings
-            embedding_results = self.generate_embeddings(chunked_data.docs)
-            embeddings = embedding_results["embeddings"]
-            texts = chunked_data.docs
-            source = chunked_data.source
-            index_on = chunked_data.index_on.isoformat()
-            additional_metadata = chunked_data.metadata
-
-            # Initialize ChromaDB client and collection
             client = chromadb.PersistentClient(path=self.chromadb_path)
             collection = client.get_or_create_collection(name=self.collection_name)
-            md5_hash = hashlib.md5(source.encode()).hexdigest() 
-            print(f"{source}: {md5_hash}")
-            ids = [f"{source}_{i}" for i in range(len(texts))]
-            metadatas = [
-                {
-                    **additional_metadata,
-                    "source": source,
-                    "index_on": index_on,
-                }
-                for _ in texts
-            ]
 
-            # Add documents to the collection
-            collection.add(
-                documents=texts,
-                embeddings=embeddings,
-                ids=ids,
-                metadatas=metadatas,
-            )
+            # Generate unique document IDs
+            md5_hash = hashlib.md5(source.encode()).hexdigest()
+            ids = [f"{md5_hash}_{i}" for i in range(len(texts))]
 
-            return {
-                "status": f"Successfully stored {len(texts)} documents.",
-                "success": True,
-                "chromadb_path": self.chromadb_path,
-                "collection_name": self.collection_name,
-                "start_time": embedding_results["start_time"],
-                "stop_time": embedding_results["stop_time"],
-                "duration_seconds": embedding_results["duration_seconds"],
-                "number_of_documents": len(texts),
-                "total_document_size": sum(len(text) for text in texts),
-            }
+            # Prepare metadata
+            metadatas = [{"source": source, **metadata} for _ in texts]
+
+            # Store in ChromaDB (one by one)
+            for i in range(len(texts)):
+                collection.add(
+                    documents=[texts[i]],
+                    embeddings=[embeddings[i]],
+                    ids=[ids[i]],
+                    metadatas=[metadatas[i]],
+                )
+
+            return {"status": "Success", "stored_documents": len(texts)}
+
         except Exception as e:
-            return {
-                "status": f"An error occurred: {str(e)}",
-                "success": False,
-                "chromadb_path": self.chromadb_path,
-                "collection_name": self.collection_name,
-                "number_of_documents": len(chunked_data.docs),
-                "total_document_size": sum(len(doc) for doc in chunked_data.docs),
-            }
+            return {"status": f"Error: {str(e)}", "stored_documents": 0}
+
 
 
